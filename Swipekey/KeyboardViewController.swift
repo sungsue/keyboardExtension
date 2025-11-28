@@ -43,8 +43,11 @@ class KeyboardViewController: UIInputViewController {
         // SwiftUI 뷰 생성 - callbacks로 textDocumentProxy 연결
         let keyboardView = KeyboardExtensionView(
             viewModel: viewModel,
-            onTextChange: { [weak self] newText in
-                self?.handleTextChange(newText)
+            onTextCommit: { [weak self] text in
+                self?.handleTextCommit(text)
+            },
+            onComposingChange: { [weak self] text in
+                self?.handleComposingChange(text)
             },
             onBackspace: { [weak self] in
                 self?.handleBackspace()
@@ -82,7 +85,7 @@ class KeyboardViewController: UIInputViewController {
             hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
-        // 투명 배경 (선택)
+        // 투명 배경
         hostingController.view.backgroundColor = .clear
 
         print("✅ [Extension] SwiftUI 키보드 뷰 설정 완료")
@@ -90,15 +93,32 @@ class KeyboardViewController: UIInputViewController {
 
     // MARK: - Text Input Handlers
 
-    /// 텍스트 변경 처리
-    private func handleTextChange(_ newText: String) {
-        guard !newText.isEmpty else { return }
+    /// 텍스트 커밋 (확정)
+    private func handleTextCommit(_ text: String) {
+        guard !text.isEmpty else { return }
 
-        print("📝 [Extension] 텍스트 삽입: '\(newText)'")
-        textDocumentProxy.insertText(newText)
+        print("📝 [Extension] 텍스트 커밋: '\(text)'")
 
-        // 삽입 후 컨텍스트 로깅
+        // 조합 중 텍스트 제거
+        textDocumentProxy.unmarkText()
+
+        // 확정된 텍스트 삽입
+        textDocumentProxy.insertText(text)
+
         logDocumentContext()
+    }
+
+    /// 조합 중 텍스트 변경 (임시 표시)
+    private func handleComposingChange(_ text: String) {
+        print("🔄 [Extension] 조합 중 텍스트: '\(text)'")
+
+        if text.isEmpty {
+            // 조합 중 텍스트 제거
+            textDocumentProxy.unmarkText()
+        } else {
+            // 조합 중 텍스트를 외부 앱에 임시로 표시
+            textDocumentProxy.setMarkedText(text, selectedRange: NSRange(location: text.count, length: 0))
+        }
     }
 
     /// 백스페이스 처리
@@ -108,19 +128,26 @@ class KeyboardViewController: UIInputViewController {
         // textDocumentProxy로 외부 앱 텍스트 삭제
         textDocumentProxy.deleteBackward()
 
-        // 삭제 후 컨텍스트 로깅
         logDocumentContext()
     }
 
     /// 스페이스 처리
     private func handleSpace() {
         print("␣ [Extension] 스페이스 입력")
+
+        // 조합 중 텍스트 제거 (커밋은 Extension에서 처리됨)
+        textDocumentProxy.unmarkText()
+
         textDocumentProxy.insertText(" ")
     }
 
     /// 엔터 처리
     private func handleReturn() {
         print("↵ [Extension] 엔터 입력")
+
+        // 조합 중 텍스트 제거 (커밋은 Extension에서 처리됨)
+        textDocumentProxy.unmarkText()
+
         textDocumentProxy.insertText("\n")
     }
 
@@ -133,17 +160,13 @@ class KeyboardViewController: UIInputViewController {
     // MARK: - UIInputViewController Overrides
 
     override func textWillChange(_ textInput: UITextInput?) {
-        // 텍스트 변경 전 호출
         super.textWillChange(textInput)
         print("📄 [Extension] textWillChange 호출")
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
-        // 텍스트 변경 후 호출
         super.textDidChange(textInput)
         print("📄 [Extension] textDidChange 호출")
-
-        // 현재 컨텍스트 확인
         logDocumentContext()
     }
 

@@ -3,26 +3,28 @@ import SwiftUI
 /// Extension용 키보드 메인 뷰
 struct KeyboardExtensionView: View {
     @ObservedObject var viewModel: KeyboardViewModel
-    
+
     // Callbacks - textDocumentProxy 연결
-    let onTextChange: (String) -> Void
+    let onTextCommit: (String) -> Void          // 확정된 텍스트 전송
+    let onComposingChange: (String) -> Void     // 조합 중 텍스트 변경
     let onBackspace: () -> Void
     let onSpace: () -> Void
     let onReturn: () -> Void
     let onGlobePress: () -> Void
-    
+
     private let layout = KeyboardLayoutManager.getQWERTYLayout()
-    
-    // 이전 텍스트 추적 (변경 감지용)
-    @State private var previousDisplayText: String = ""
-    
+
+    // 이전 상태 추적
+    @State private var lastCommittedText: String = ""
+    @State private var lastComposingText: String = ""
+
     var body: some View {
         VStack(spacing: 0) {
-            // 조합 중인 텍스트 표시
+            // 조합 중인 텍스트 표시 (키보드 UI에만 - 선택적)
 //            if !viewModel.composingText.isEmpty {
 //                ComposingTextView(text: viewModel.composingText)
 //            }
-            
+
             // 키보드 그리드
             VStack(spacing: 6) {
                 ForEach(0..<layout.count, id: \.self) { row in
@@ -38,13 +40,15 @@ struct KeyboardExtensionView: View {
         }
         .frame(height: 280)
         .background(Color(UIColor.systemGray6))
-        .onChange(of: viewModel.displayText) { newValue in
-            handleDisplayTextChange(newValue)
+        .onChange(of: viewModel.composingText) { newComposing in
+            // ⚠️ 백스페이스 시에는 onChange에서 처리하지 않음!
+            // handleKeyInput과 handleBackspacePress에서 명시적으로 처리
+            handleComposingChangeFromNormalInput(newComposing)
         }
     }
-    
+
     // MARK: - Key Button Factory
-    
+
     @ViewBuilder
     private func makeKeyButton(for key: KeyboardKey) -> some View {
         if let specialType = key.specialType {
@@ -53,7 +57,7 @@ struct KeyboardExtensionView: View {
             makeNormalKeyButton(key)
         }
     }
-    
+
     /// 일반 키 버튼
     private func makeNormalKeyButton(_ key: KeyboardKey) -> some View {
         KeyButtonView(
@@ -63,105 +67,163 @@ struct KeyboardExtensionView: View {
             }
         )
     }
-    
-    /// 특수 키 버튼 (커스텀 처리)
+
+    /// 특수 키 버튼
     private func makeSpecialKeyButton(_ key: KeyboardKey, type: SpecialKeyType) -> some View {
         Group {
             switch type {
             case .delete:
                 DeleteKeyButton(onPress: handleBackspacePress)
-                
             case .space:
                 SpaceKeyButton(onPress: handleSpacePress)
-                
             case .enter:
                 EnterKeyButton(onPress: handleReturnPress)
-                
             case .numberToggle:
                 ToggleKeyButton(label: "?123", onPress: { })
-                
             case .empty:
                 EmptyKeyButton()
             }
         }
     }
-    
+
     // MARK: - Input Handlers
-    
+
     /// 일반 키 입력 처리
     private func handleKeyInput(_ key: KeyboardKey, direction: SwipeDirection) {
         print("\n[ExtensionView] 키 입력: \(key.defaultValue) 방향:\(direction)")
-        
+
+        // 입력 전 상태
+        let beforeState = viewModel.getState()
+        print("[ExtensionView] 입력 전 - committed:'\(beforeState.committed)' composing:'\(beforeState.composing)'")
+
         // ViewModel에 전달
         viewModel.handleKeyInput(key, direction: direction)
+
+        // 입력 후 상태
+        let afterState = viewModel.getState()
+        print("[ExtensionView] 입력 후 - committed:'\(afterState.committed)' composing:'\(afterState.composing)'")
+
+        // committed 텍스트가 증가했으면 전송
+        if afterState.committed != beforeState.committed {
+            let newCommitted = String(afterState.committed.dropFirst(beforeState.committed.count))
+            if !newCommitted.isEmpty {
+                print("[ExtensionView] ✅ 커밋된 텍스트 전송: '\(newCommitted)'")
+                onTextCommit(newCommitted)
+                lastCommittedText = afterState.committed
+            }
+        }
+
+        // composing 텍스트 업데이트
+        updateComposingText(afterState.composing)
     }
-    
+
+    /// 일반 입력으로 인한 composingText 변경 (onChange에서 호출)
+    private func handleComposingChangeFromNormalInput(_ newComposing: String) {
+        // onChange는 모든 경우에 발생하므로
+        // 백스페이스는 별도 처리되므로 여기서는 스킵
+        // (백스페이스는 handleBackspacePress에서 명시적으로 처리)
+    }
+
+    /// 조합 중 텍스트 업데이트 (명시적 호출)
+    private func updateComposingText(_ newComposing: String) {
+        guard newComposing != lastComposingText else { return }
+
+        print("[ExtensionView] 🔄 조합 중 텍스트 변경: '\(lastComposingText)' → '\(newComposing)'")
+
+        // 조합 중 텍스트를 외부 앱에 임시로 표시
+        onComposingChange(newComposing)
+        lastComposingText = newComposing
+    }
+
     /// 백스페이스 처리
     private func handleBackspacePress() {
         print("[ExtensionView] 백스페이스 터치")
-        
-        // 1. ViewModel 상태 업데이트
+
+        // 입력 전 상태
+        let beforeState = viewModel.getState()
+        print("[ExtensionView] 백스페이스 전 - committed:'\(beforeState.committed)' composing:'\(beforeState.composing)'")
+
+        // ViewModel 상태 업데이트
         viewModel.handleKeyInput(
             KeyboardKey(defaultValue: "⌫", engineKey: "", specialType: .delete),
             direction: .none
         )
-        
-        // 2. 외부 앱 텍스트 삭제
+
+        // 입력 후 상태
+        let afterState = viewModel.getState()
+        print("[ExtensionView] 백스페이스 후 - committed:'\(afterState.committed)' composing:'\(afterState.composing)'")
+
+        // ⚠️ 중요: 순서가 핵심!
+        // 1. 먼저 외부 앱 백스페이스 실행
+        print("[ExtensionView] ✅ 외부 앱 백스페이스 실행")
         onBackspace()
+
+        // 2. 그 다음 조합 중 텍스트 업데이트
+        updateComposingText(afterState.composing)
+
+        lastCommittedText = afterState.committed
     }
-    
+
     /// 스페이스 처리
     private func handleSpacePress() {
         print("[ExtensionView] 스페이스 터치")
-        
-        // 1. ViewModel에서 현재 조합 커밋
+
+        let beforeState = viewModel.getState()
+
+        // ViewModel에서 현재 조합 커밋
         viewModel.handleKeyInput(
             KeyboardKey(defaultValue: "␣", engineKey: "", specialType: .space),
             direction: .none
         )
-        
-        // 2. 외부 앱에 스페이스 전송
+
+        let afterState = viewModel.getState()
+
+        // 커밋된 텍스트 전송
+        if afterState.committed != beforeState.committed {
+            let newCommitted = String(afterState.committed.dropFirst(beforeState.committed.count))
+            if !newCommitted.isEmpty {
+                print("[ExtensionView] ✅ 커밋된 텍스트 전송: '\(newCommitted)'")
+                onTextCommit(newCommitted)
+                lastCommittedText = afterState.committed
+            }
+        }
+
+        // 스페이스 전송
         onSpace()
+
+        // composing 텍스트 업데이트 (비어있을 것)
+        updateComposingText(afterState.composing)
     }
-    
+
     /// 엔터 처리
     private func handleReturnPress() {
         print("[ExtensionView] 엔터 터치")
-        
-        // 1. ViewModel에서 현재 조합 커밋
+
+        let beforeState = viewModel.getState()
+
+        // ViewModel에서 현재 조합 커밋
         viewModel.handleKeyInput(
             KeyboardKey(defaultValue: "↵", engineKey: "", specialType: .enter),
             direction: .none
         )
-        
-        // 2. 외부 앱에 엔터 전송
-        onReturn()
-    }
-    
-    // MARK: - Text Change Handler
-    
-    /// displayText 변경 감지 및 전송
-    private func handleDisplayTextChange(_ newText: String) {
-        // 변경된 부분만 추출
-        if newText.hasPrefix(previousDisplayText) {
-            // 텍스트 추가됨
-            let addedText = String(newText.dropFirst(previousDisplayText.count))
-            if !addedText.isEmpty {
-                print("[ExtensionView] 텍스트 추가: '\(addedText)'")
-                onTextChange(addedText)
-            }
-        } else if previousDisplayText.hasPrefix(newText) {
-            // 텍스트 삭제됨 (백스페이스는 별도 처리하므로 무시)
-            print("[ExtensionView] 텍스트 삭제 감지 (백스페이스로 처리됨)")
-        } else {
-            // 완전히 다른 텍스트 (리셋 등)
-            print("[ExtensionView] 텍스트 완전 변경")
-            if !newText.isEmpty {
-                onTextChange(newText)
+
+        let afterState = viewModel.getState()
+
+        // 커밋된 텍스트 전송
+        if afterState.committed != beforeState.committed {
+            let newCommitted = String(afterState.committed.dropFirst(beforeState.committed.count))
+            if !newCommitted.isEmpty {
+                print("[ExtensionView] ✅ 커밋된 텍스트 전송: '\(newCommitted)'")
+                onTextCommit(newCommitted)
+                lastCommittedText = afterState.committed
             }
         }
-        
-        previousDisplayText = newText
+
+        // 엔터 전송
+        onReturn()
+
+        // composing 텍스트 업데이트 (비어있을 것)
+        updateComposingText(afterState.composing)
     }
 }
 
@@ -169,7 +231,7 @@ struct KeyboardExtensionView: View {
 
 struct ComposingTextView: View {
     let text: String
-    
+
     var body: some View {
         HStack {
             Text(text)
@@ -182,7 +244,7 @@ struct ComposingTextView: View {
                         .fill(Color.white.opacity(0.95))
                         .shadow(radius: 2)
                 )
-            
+
             Spacer()
         }
         .padding(.horizontal)
@@ -192,17 +254,16 @@ struct ComposingTextView: View {
 
 // MARK: - Special Key Buttons
 
-/// 백스페이스 키
 struct DeleteKeyButton: View {
     let onPress: () -> Void
     @State private var isPressed = false
-    
+
     var body: some View {
         Button(action: onPress) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isPressed ? Color.gray.opacity(0.5) : Color.gray.opacity(0.3))
-                
+
                 Image(systemName: "delete.left")
                     .font(.system(size: 24))
                     .foregroundColor(.black)
@@ -218,17 +279,16 @@ struct DeleteKeyButton: View {
     }
 }
 
-/// 스페이스 키
 struct SpaceKeyButton: View {
     let onPress: () -> Void
     @State private var isPressed = false
-    
+
     var body: some View {
         Button(action: onPress) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isPressed ? Color.white.opacity(0.7) : Color.white)
-                
+
                 Text("space")
                     .font(.system(size: 16))
                     .foregroundColor(.black)
@@ -244,17 +304,16 @@ struct SpaceKeyButton: View {
     }
 }
 
-/// 엔터 키
 struct EnterKeyButton: View {
     let onPress: () -> Void
     @State private var isPressed = false
-    
+
     var body: some View {
         Button(action: onPress) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isPressed ? Color.blue.opacity(0.7) : Color.blue)
-                
+
                 Image(systemName: "return")
                     .font(.system(size: 20))
                     .foregroundColor(.white)
@@ -270,18 +329,17 @@ struct EnterKeyButton: View {
     }
 }
 
-/// 숫자/기호 전환 키
 struct ToggleKeyButton: View {
     let label: String
     let onPress: () -> Void
     @State private var isPressed = false
-    
+
     var body: some View {
         Button(action: onPress) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isPressed ? Color.gray.opacity(0.5) : Color.gray.opacity(0.3))
-                
+
                 Text(label)
                     .font(.system(size: 16))
                     .foregroundColor(.black)
@@ -297,7 +355,6 @@ struct ToggleKeyButton: View {
     }
 }
 
-/// 빈 키
 struct EmptyKeyButton: View {
     var body: some View {
         Color.clear
@@ -311,7 +368,8 @@ struct KeyboardExtensionView_Previews: PreviewProvider {
     static var previews: some View {
         KeyboardExtensionView(
             viewModel: KeyboardViewModel(),
-            onTextChange: { print("Text: \($0)") },
+            onTextCommit: { print("Commit: \($0)") },
+            onComposingChange: { print("Composing: \($0)") },
             onBackspace: { print("Backspace") },
             onSpace: { print("Space") },
             onReturn: { print("Return") },
