@@ -153,13 +153,25 @@ struct KeyboardExtensionView: View {
         let afterState = viewModel.getState()
         print("[ExtensionView] 백스페이스 후 - committed:'\(afterState.committed)' composing:'\(afterState.composing)'")
 
-        // ⚠️ 중요: 순서가 핵심!
-        // 1. 먼저 외부 앱 백스페이스 실행
-        print("[ExtensionView] ✅ 외부 앱 백스페이스 실행")
-        onBackspace()
+        // ⚠️ 중요: committed가 실제로 줄어들었을 때만 deleteBackward()
+        let committedChanged = afterState.committed.count < beforeState.committed.count
 
-        // 2. 그 다음 조합 중 텍스트 업데이트
-        updateComposingText(afterState.composing)
+        if committedChanged {
+            // committed가 줄어들었으면 외부 앱에서도 삭제
+            print("[ExtensionView] ✅ committed 감소 → 외부 앱 백스페이스 실행")
+            // 1. deleteBackward() 먼저
+            onBackspace()
+            // 2. composing 업데이트 나중에
+            updateComposingText(afterState.composing)
+        } else if !beforeState.composing.isEmpty {
+            // composing만 변경 → markedText만 업데이트
+            print("[ExtensionView] ⏭️ composing만 변경 → markedText 업데이트만")
+            updateComposingText(afterState.composing)
+        } else if beforeState.composing.isEmpty && afterState.composing.isEmpty {
+            // 엔진 히스토리 비어있음 → 외부 텍스트 삭제
+            print("[ExtensionView] ✅ 엔진 비어있음 → 외부 앱 백스페이스 실행")
+            onBackspace()
+        }
 
         lastCommittedText = afterState.committed
     }

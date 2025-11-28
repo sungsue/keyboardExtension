@@ -99,10 +99,9 @@ class KeyboardViewController: UIInputViewController {
 
         print("📝 [Extension] 텍스트 커밋: '\(text)'")
 
-        // 조합 중 텍스트 제거
-        textDocumentProxy.unmarkText()
-
-        // 확정된 텍스트 삽입
+        // ⚠️ 중요: markedText가 있을 때 unmarkText() 호출하면
+        // markedText가 confirmed로 변환되어 중복 입력됨!
+        // 해결: insertText()가 markedText를 자동으로 교체함
         textDocumentProxy.insertText(text)
 
         logDocumentContext()
