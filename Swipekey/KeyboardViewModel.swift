@@ -5,7 +5,8 @@ import Combine
 // MARK: - 키보드 ViewModel (v5 엔진 통합)
 class KeyboardViewModel: ObservableObject {
     @Published var displayText: String = ""
-    
+    @Published var lastDeletedKey: String?
+
     private let engine = HangulInputEngine()
     
     init() {
@@ -49,7 +50,7 @@ class KeyboardViewModel: ObservableObject {
         // 엔진 키가 비어있으면 특수문자로 직접 입력
         if engineKey.isEmpty {
             print("[ViewModel] 특수문자 직접 입력: '\(displayChar)'")
-            engine.commitCurrent()  // 현재 조합 커밋
+            engine.commitAndReset()  // 현재 조합 커밋하고 리셋
             displayText = engine.displayText + displayChar
             return
         }
@@ -71,17 +72,18 @@ class KeyboardViewModel: ObservableObject {
     private func handleSpecialKey(_ type: SpecialKeyType) {
         switch type {
         case .delete:
-            engine.processBackspace()
+            let result = engine.processBackspace()
+            lastDeletedKey = result.deletedKey
             updateDisplay()
-            
+
         case .space:
-            engine.commitCurrent()
-            displayText += " "
-            
+            engine.processKey(" ")  // 히스토리에 스페이스 기록
+            updateDisplay()
+
         case .enter:
-            engine.commitCurrent()
-            displayText += "\n"
-            
+            engine.processKey("\n")  // 히스토리에 엔터 기록
+            updateDisplay()
+
         case .numberToggle, .empty:
             break
         }
@@ -100,8 +102,9 @@ class KeyboardViewModel: ObservableObject {
         print("[ViewModel] 리셋 완료")
     }
     
-    /// 현재 상태 가져오기
-    func getState() -> (composing: String, committed: String, display: String) {
-        return engine.getState()
+    /// 현재 상태 가져오기 (삭제된 키 포함)
+    func getState() -> (composing: String, committed: String, display: String, deletedKey: String?) {
+        let state = engine.getState()
+        return (state.composing, state.committed, state.display, lastDeletedKey)
     }
 }

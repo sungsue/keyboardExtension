@@ -174,7 +174,7 @@ class HangulAutomata {
         } else if !comp.jongsung.isEmpty {
             // ★★★ 핵심: 종성 분리 ★★★
             print("      [중성] 초+중+종 상태 → 종성 분리")
-            
+
             if comp.jongsung.count == 2 {
                 print("      [중성] 겹받침 → 첫 자음만 남김")
                 comp.jongsung = String(comp.jongsung.prefix(1))

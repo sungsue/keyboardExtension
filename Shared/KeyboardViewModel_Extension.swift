@@ -7,6 +7,7 @@ class KeyboardViewModel: ObservableObject {
     // UI 표시용 (참고용)
     @Published var displayText: String = ""
     @Published var composingText: String = ""
+    @Published var lastDeletedKey: String?
 
     private let engine = HangulInputEngine()
 
@@ -51,7 +52,7 @@ class KeyboardViewModel: ObservableObject {
         // 엔진 키가 비어있으면 특수문자로 직접 입력
         if engineKey.isEmpty {
             print("[ViewModel] 특수문자 직접 입력: '\(displayChar)'")
-            engine.commitCurrent()  // 현재 조합 커밋
+            engine.commitAndReset()  // 현재 조합 커밋하고 리셋
 
             // ⚠️ 특수문자는 엔진을 우회하므로 별도 처리 필요
             // Extension에서는 이 케이스를 별도로 처리해야 함
@@ -80,17 +81,20 @@ class KeyboardViewModel: ObservableObject {
         switch type {
         case .delete:
             print("[ViewModel] 백스페이스 처리")
-            engine.processBackspace()
+            let result = engine.processBackspace()
+            lastDeletedKey = result.deletedKey
             updateDisplay()
 
         case .space:
-            print("[ViewModel] 스페이스 처리 - 조합 커밋")
-            engine.commitCurrent()
+            print("[ViewModel] 스페이스 처리 - 단어 종료")
+            engine.commitAndReset()  // 현재 단어 커밋하고 엔진 리셋
+            lastDeletedKey = nil
             updateDisplay()
 
         case .enter:
-            print("[ViewModel] 엔터 처리 - 조합 커밋")
-            engine.commitCurrent()
+            print("[ViewModel] 엔터 처리 - 단어 종료")
+            engine.commitAndReset()  // 현재 단어 커밋하고 엔진 리셋
+            lastDeletedKey = nil
             updateDisplay()
 
         case .numberToggle, .empty:
@@ -120,15 +124,15 @@ class KeyboardViewModel: ObservableObject {
 
     /// 현재 상태 가져오기
     /// ⚠️ Extension에서는 이 메서드로 committed/composing 구분!
-    func getState() -> (composing: String, committed: String, display: String) {
+    func getState() -> (composing: String, committed: String, display: String, deletedKey: String?) {
         let state = engine.getState()
         print("[ViewModel.getState()] committed:'\(state.committed)' composing:'\(state.composing)'")
-        return state
+        return (state.composing, state.committed, state.display, lastDeletedKey)
     }
 
     /// 강제 커밋 (Extension에서 사용)
     func commitCurrent() {
-        engine.commitCurrent()
+        engine.commitAndReset()
         updateDisplay()
         print("[ViewModel] 강제 커밋 완료")
     }

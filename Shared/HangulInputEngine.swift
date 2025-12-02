@@ -23,19 +23,20 @@ class HangulInputEngine {
     /// - Returns: 업데이트 성공 여부
     @discardableResult
     func processKey(_ key: String) -> Bool {
-        print("\n[입력 엔진] 키: '\(key)'")
-        
+        print("\n[입력 엔진] ✅ 키 입력: '\(key)'")
+
         // 히스토리에 기록
         keyHistory.append(key)
-        
+        print("[입력 엔진] 히스토리 추가 후: \(keyHistory)")
+
         // 오토마타 처리
         let comp = automata.process(key: key)
-        
+
         if comp.isDone {
             // 조합 완료 - 커밋
             print("[입력 엔진] 조합 완료 → 커밋")
             commitComposition(comp)
-            
+
             // 남은 입력으로 새 조합 시작
             currentComposition = automata.getCurrentComposition()
             updateComposingText()
@@ -44,51 +45,59 @@ class HangulInputEngine {
             currentComposition = comp
             updateComposingText()
         }
-        
+
         updateDisplayText()
-        print("[입력 엔진] 화면: '\(displayText)'")
-        
+        print("[입력 엔진] 처리 후 화면: '\(displayText)'")
+
         return true
     }
     
     /// 백스페이스 처리
-    /// - Returns: 삭제 성공 여부
+    /// - Returns: (성공 여부, 삭제된 키)
     @discardableResult
-    func processBackspace() -> Bool {
+    func processBackspace() -> (success: Bool, deletedKey: String?) {
         print("\n[입력 엔진] 백스페이스")
-        
+        print("[입력 엔진] 백스페이스 전 히스토리: \(keyHistory)")
+
         guard !keyHistory.isEmpty else {
-            print("[입력 엔진] 히스토리 비어있음")
-            return false
+            print("[입력 엔진] ❌ 히스토리 비어있음")
+            return (false, nil)
         }
-        
-        // 히스토리에서 제거
-        keyHistory.removeLast()
-        print("[입력 엔진] 히스토리: \(keyHistory)")
-        
+
+        // 히스토리에서 제거하고 삭제된 키 기록
+        let deletedKey = keyHistory.removeLast()
+        print("[입력 엔진] 삭제된 키: '\(deletedKey)'")
+        print("[입력 엔진] 백스페이스 후 히스토리: \(keyHistory)")
+
         // 전체 재조합
         recomposeAll()
-        
-        print("[입력 엔진] 화면: '\(displayText)'")
-        return true
+
+        print("[입력 엔진] 재조합 후 화면: '\(displayText)'")
+        return (true, deletedKey)
     }
     
-    /// 강제 커밋 (스페이스, 엔터)
-    func commitCurrent() {
-        print("\n[입력 엔진] 강제 커밋")
-        
+    /// 강제 커밋 및 리셋 (스페이스, 엔터 입력 시)
+    func commitAndReset() {
+        print("\n[입력 엔진] 강제 커밋 및 리셋")
+
         let comp = automata.flush()
         commitComposition(comp)
-        
+
+        // 현재 단어 종료 - 엔진 리셋
+        automata.reset()
         currentComposition = Composition()
         composingText = ""
+        committedText = ""  // committed도 리셋 (현재 단어만 관리)
+        keyHistory.removeAll()
+
         updateDisplayText()
+        print("[입력 엔진] 리셋 완료 - 새 단어 시작")
     }
-    
+
     /// 전체 초기화
     func reset() {
-        print("\n[입력 엔진] 리셋")
-        
+        print("\n[입력 엔진] 전체 리셋")
+
         automata.reset()
         currentComposition = Composition()
         composingText = ""
@@ -133,23 +142,28 @@ class HangulInputEngine {
         displayText = committedText + composingText
     }
     
-    /// 전체 키 히스토리로부터 재조합
+    /// 전체 키 히스토리로부터 재조합 (현재 단어만)
     private func recomposeAll() {
+        print("[입력 엔진] 🔄 재조합 시작 - 히스토리: \(keyHistory)")
         automata.reset()
         committedText = ""
         composingText = ""
-        
-        for key in keyHistory {
+
+        for (index, key) in keyHistory.enumerated() {
             let comp = automata.process(key: key)
             if comp.isDone {
+                print("[입력 엔진] 재조합[\(index)]: '\(key)' → 완료")
                 commitComposition(comp)
+            } else {
+                print("[입력 엔진] 재조합[\(index)]: '\(key)' → 조합 중")
             }
         }
-        
+
         // 마지막 조합 중인 것
         currentComposition = automata.getCurrentComposition()
         updateComposingText()
         updateDisplayText()
+        print("[입력 엔진] 🔄 재조합 완료 - committed: '\(committedText)' composing: '\(composingText)'")
     }
 }
 
